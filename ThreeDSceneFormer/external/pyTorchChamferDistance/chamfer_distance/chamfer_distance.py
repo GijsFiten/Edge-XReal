@@ -1,15 +1,30 @@
 
 import torch
 
-from torch.utils.cpp_extension import load
-cd = load(name="build",
-          sources=["ThreeDSceneFormer/external/pyTorchChamferDistance/chamfer_distance/chamfer_distance.cpp",
-                   "ThreeDSceneFormer/external/pyTorchChamferDistance/chamfer_distance/chamfer_distance.cu"],
-          build_directory="ThreeDSceneFormer/external/pyTorchChamferDistance/build")
+# Inference imports loss/test definitions but never evaluates Chamfer distance.
+# Build the optional metric extension only when that metric is actually called.
+from pathlib import Path
+
+_cd = None
+
+
+def _get_extension():
+    global _cd
+    if _cd is None:
+        from torch.utils.cpp_extension import load
+        source_dir = Path(__file__).resolve().parent
+        build_dir = source_dir.parent / 'build'
+        build_dir.mkdir(parents=True, exist_ok=True)
+        _cd = load(name="build",
+                   sources=[str(source_dir / 'chamfer_distance.cpp'),
+                            str(source_dir / 'chamfer_distance.cu')],
+                   build_directory=str(build_dir))
+    return _cd
 
 class ChamferDistanceFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, xyz1, xyz2):
+        cd = _get_extension()
         batchsize, n, _ = xyz1.size()
         _, m, _ = xyz2.size()
         xyz1 = xyz1.contiguous()
@@ -35,6 +50,7 @@ class ChamferDistanceFunction(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, graddist1, graddist2, *args):
+        cd = _get_extension()
         xyz1, xyz2, idx1, idx2 = ctx.saved_tensors
 
         graddist1 = graddist1.contiguous()

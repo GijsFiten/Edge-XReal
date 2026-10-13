@@ -210,3 +210,17 @@ returned_items.json
 sample_images/
 XRSU.zip
 zipeverything.sh
+
+# Raw local revision measurements
+revision_results/
+
+# Local inference assets and machine-specific diagnostic tools
+*.tar
+XRSU*.zip
+/layout_avg_file.pkl
+/size_avg_category.pkl
+/diagnose_*.py
+/upgrade_hsu.py
+/restore_hsu_torch.py
+/requirements-hsu-5080.txt
+/Edge-XReal_test_notes.md

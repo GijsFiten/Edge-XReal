@@ -4,7 +4,11 @@ Repository accompanying “XR-Scene-Understanding: Distributed Deep Learning Bas
 
 This code provides a minimal Flask server that exposes HSU pipelines (ThreeDSceneFormer, Total3D, Implicit3D) as an HTTP API for evaluation.
 
-## Tested environment
+## RTX 4070 Laptop revision tests
+
+For a fresh WSL Ubuntu 24.04 installation with CUDA inside Conda, follow [SETUP_4070.md](SETUP_4070.md). This path includes asset verification, an inference-only LDIF build and the revision measurement runner. Laptop runtime validation is still pending.
+
+## Original reported environment
 
 - OS: Ubuntu 24.04 LTS
 - Python: 3.8

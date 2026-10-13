@@ -13,7 +13,7 @@ from PIL import Image
 import numpy as np
 from configs.data_config import Relation_Config, NYU40CLASSES
 import math
-import collections
+import collections.abc
 
 default_collate = torch.utils.data.dataloader.default_collate
 
@@ -118,9 +118,9 @@ def recursive_convert_to_torch(elem):
         return torch.LongTensor([elem])
     elif isinstance(elem, float):
         return torch.DoubleTensor([elem])
-    elif isinstance(elem, collections.Mapping):
+    elif isinstance(elem, collections.abc.Mapping):
         return {key: recursive_convert_to_torch(elem[key]) for key in elem}
-    elif isinstance(elem, collections.Sequence):
+    elif isinstance(elem, collections.abc.Sequence):
         return [recursive_convert_to_torch(samples) for samples in elem]
     else:
         return elem

@@ -109,11 +109,16 @@ class CheckpointIO(object):
         else:
             weight_paths = self.cfg.config['weight']
 
+        # Configured weights are relative to this model package, not the launch CWD.
+        model_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         for weight_path in weight_paths:
-            if not os.path.exists("Implicit3DUnderstanding/" + weight_path):
-                self.cfg.log_string('Warning: finetune failed: the weight path %s is invalid. Begin to train from scratch.' % ("Implicit3DUnderstanding/" + weight_path))
+            resolved_path = os.path.join(model_root, weight_path)
+            if not os.path.isfile(resolved_path):
+                if self.cfg.config.get('mode') == 'demo':
+                    raise FileNotFoundError('Inference checkpoint not found: ' + resolved_path)
+                self.cfg.log_string('Warning: finetune failed: the weight path %s is invalid. Begin to train from scratch.' % resolved_path)
             else:
-                self.load("Implicit3DUnderstanding/" + weight_path, 'net')
+                self.load(resolved_path, 'net')
                 self.cfg.log_string('Weights for finetuning loaded.')
 
     def resume(self):
