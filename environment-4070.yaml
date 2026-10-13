@@ -86,6 +86,8 @@ dependencies:
   - libbrotlienc=1.0.9=h166bdaf_9
   - libcblas=3.9.0=12_linux64_mkl
   - libcurl=7.87.0=h6312ad2_0
+  # Python 3.8.6's Python.h includes crypt.h when building pip extensions.
+  - libxcrypt=4.4.36=hd590300_1
   - libdeflate=1.14=h166bdaf_0
   - libdrm=2.4.114=h166bdaf_0
   - libedit=3.1.20191231=he28a2e2_2
@@ -207,7 +209,55 @@ dependencies:
   - zlib-ng=2.0.7=h0b41bf4_0
   - zstandard=0.19.0=py38ha98ab4e_2
   - zstd=1.5.2=hfc55251_7
+  # Pin the complete NVIDIA toolkit closure: metapackage lower bounds allow newer CUDA.
+  - cuda-cccl=11.8.89
+  - cuda-command-line-tools=11.8.0
+  - cuda-compiler=11.8.0
+  - cuda-cudart=11.8.89
+  - cuda-cudart-dev=11.8.89
+  - cuda-cuobjdump=11.8.86
+  - cuda-cupti=11.8.87
+  - cuda-cuxxfilt=11.8.86
+  - cuda-documentation=11.8.86
+  - cuda-driver-dev=11.8.89
+  - cuda-gdb=11.8.86
+  - cuda-libraries=11.8.0
+  - cuda-libraries-dev=11.8.0
+  - cuda-memcheck=11.8.86
+  - cuda-nsight=11.8.86
+  - cuda-nsight-compute=11.8.0
+  - cuda-nvcc=11.8.89
+  - cuda-nvdisasm=11.8.86
+  - cuda-nvml-dev=11.8.86
+  - cuda-nvprof=11.8.87
+  - cuda-nvprune=11.8.86
+  - cuda-nvrtc=11.8.89
+  - cuda-nvrtc-dev=11.8.89
+  - cuda-nvtx=11.8.86
+  - cuda-nvvp=11.8.87
+  - cuda-profiler-api=11.8.86
+  - cuda-sanitizer-api=11.8.86
   - cuda-toolkit=11.8.0
+  - cuda-tools=11.8.0
+  - cuda-visual-tools=11.8.0
+  - gds-tools=1.4.0.31
+  - libcublas=11.11.3.6
+  - libcublas-dev=11.11.3.6
+  - libcufft=10.9.0.58
+  - libcufft-dev=10.9.0.58
+  - libcufile=1.4.0.31
+  - libcufile-dev=1.4.0.31
+  - libcurand=10.3.0.86
+  - libcurand-dev=10.3.0.86
+  - libcusolver=11.4.1.48
+  - libcusolver-dev=11.4.1.48
+  - libcusparse=11.7.5.86
+  - libcusparse-dev=11.7.5.86
+  - libnpp=11.8.0.86
+  - libnpp-dev=11.8.0.86
+  - libnvjpeg=11.9.0.86
+  - libnvjpeg-dev=11.9.0.86
+  - nsight-compute=2022.3.0.22
   - gxx_linux-64=11
   - pip:
       - absl-py==1.4.0
@@ -326,6 +376,8 @@ dependencies:
       - keyring==24.2.0
       - kiwisolver==1.4.7
       - lazy-object-proxy==1.9.0
+      # torchtriton's Conda package does not install this Python dependency.
+      - lit==16.0.6
       - markdown==3.4.4
       - markdown-it-py==3.0.0
       - markupsafe==2.1.3

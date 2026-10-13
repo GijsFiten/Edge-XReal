@@ -167,6 +167,15 @@ def initiate(cfg_begin):
 
     cfg = cfg_begin
 
+    # On the pinned PyTorch 2.0.1/CUDA 11.8 laptop stack, optimized SDP
+    # attention produced NaNs from finite Transformer inputs. The math
+    # implementation passed the six failing scenes with the same weights.
+    # Set this once at startup so concurrent requests share a stable backend.
+    if cfg.config['mode'] == 'demo' and torch.__version__.split('+')[0] == '2.0.1':
+        torch.backends.cuda.enable_flash_sdp(False)
+        torch.backends.cuda.enable_mem_efficient_sdp(False)
+        torch.backends.cuda.enable_math_sdp(True)
+
     checkpoint = CheckpointIO(cfg)
 
     '''Mount external config data'''

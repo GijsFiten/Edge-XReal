@@ -10,12 +10,14 @@ import contextlib
 import gzip
 import hashlib
 import importlib
+import importlib.util
 import io
 import json
 import math
 import os
 from pathlib import Path
 import platform
+import socket
 import statistics
 import subprocess
 import sys
@@ -133,6 +135,7 @@ def prepare(args, out):
     chosen = samples((args.inputs or root / 'sample_images').resolve(), limit)
     manifest = {'status': 'prepared_not_run', 'model': args.model, 'detector': 'Resnet50',
                 'suite': args.suite, 'command': sys.argv, 'utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                'allow_no_detections': getattr(args, 'allow_no_detections', False),
                 'python': sys.version, 'executable': sys.executable, 'platform': platform.platform(),
                 'conda_environment': os.environ.get('CONDA_DEFAULT_ENV'),
                 'repo': str(root), 'source_config': str(config_path), 'effective_config': config,
@@ -180,7 +183,12 @@ def load_server(args, config):
 
     utils.CheckpointIO.parse_state_dict = audited_parse
     sys.argv = [str(root / 'server.py'), '--hsu_model', args.model, '--bb_model', 'Resnet50', str(config)]
-    server = importlib.import_module('server')
+    # Model folders also contain server.py. Load the repository API explicitly
+    # after adding a model folder to sys.path for its internal imports.
+    spec = importlib.util.spec_from_file_location('server', root / 'server.py')
+    server = importlib.util.module_from_spec(spec)
+    sys.modules['server'] = server
+    spec.loader.exec_module(server)
     api = sys.modules[server.run.__module__]
     required_keys = {k for k in api.net.state_dict() if not k.endswith('.num_batches_tracked')}
     missing = sorted(required_keys - loaded_keys)
@@ -196,10 +204,16 @@ def load_server(args, config):
             'gpu': torch.cuda.get_device_name(), 'device_capability': torch.cuda.get_device_capability(),
             'torch_arch_list': torch.cuda.get_arch_list(), 'loaded_state_keys': len(loaded_keys),
             'checkpoint_audit_exception': 'BatchNorm num_batches_tracked counters are not required for eval-mode inference',
+            'inference_policy': server.inference_policy,
+            'server_pid': os.getpid(),
             'effective_runtime_config': server.cfg.config,
             'cudnn_benchmark': torch.backends.cudnn.benchmark,
-            'cudnn_deterministic': torch.backends.cudnn.deterministic}
+            'cudnn_deterministic': torch.backends.cudnn.deterministic,
+            'attention_backends': {'flash': torch.backends.cuda.flash_sdp_enabled(),
+                                   'memory_efficient': torch.backends.cuda.mem_efficient_sdp_enabled(),
+                                   'math': torch.backends.cuda.math_sdp_enabled()}}
     info['inference_source_sha256'] = digest(Path(api.__file__))
+    info['server_source_sha256'] = digest(root / 'server.py')
     return server, info
 
 
@@ -305,6 +319,12 @@ def request_sample(url, sample, timeout, barrier=None, scheduled_at=None):
             payload = response.read()
         record['response_ms'] = 1000 * (time.perf_counter() - started)
         if not payload.startswith(b'\x1f\x8b'):
+            if record['http_status'] == 200:
+                try:
+                    if json.loads(payload) == {'error': 'No 2D detections'}:
+                        record['outcome'] = 'no_detections'
+                except (ValueError, UnicodeDecodeError):
+                    pass
             raise ValueError('Non-gzip API response: ' + payload[:300].decode('utf-8', errors='replace'))
         record.update(validate_payload(payload))
         record['status'] = 'ok'
@@ -313,7 +333,8 @@ def request_sample(url, sample, timeout, barrier=None, scheduled_at=None):
         if isinstance(exc, urllib.error.HTTPError):
             record['http_status'] = exc.code
         record['error'] = type(exc).__name__ + ': ' + str(exc)
-        record['timed_out'] = isinstance(exc, TimeoutError) or isinstance(getattr(exc, 'reason', None), TimeoutError)
+        timeout_types = (TimeoutError, socket.timeout)
+        record['timed_out'] = isinstance(exc, timeout_types) or isinstance(getattr(exc, 'reason', None), timeout_types)
     return record, payload
 
 
@@ -345,12 +366,20 @@ def summarise(records):
     selected = [r for r in records if not r.get('warmup')]
     ok = [r['response_ms'] for r in selected if r['status'] == 'ok']
     values = sorted(ok)
+    no_detections = sum(r.get('outcome') == 'no_detections' for r in selected)
     return {'attempted': len(selected), 'successful_valid_responses': len(ok),
             'failed': len(selected) - len(ok),
+            'no_detections': no_detections,
+            'other_failures': len(selected) - len(ok) - no_detections,
             'success_latency_mean_ms': statistics.mean(ok) if ok else None,
             'success_latency_median_ms': statistics.median(ok) if ok else None,
             'success_latency_p95_nearest_rank_ms': values[math.ceil(.95 * len(values)) - 1] if values else None,
             'warning': 'Latency is conditional on valid responses. No reconstruction accuracy, headset latency, or user capacity is inferred.'}
+
+
+def accepted_outcome(row, args):
+    return row['status'] == 'ok' or (
+        getattr(args, 'allow_no_detections', False) and row.get('outcome') == 'no_detections')
 
 
 def local_sample(server, sample, worker_start=None, input_bytes=None):
@@ -372,6 +401,7 @@ def local_sample(server, sample, worker_start=None, input_bytes=None):
         if worker_start is not None:
             row['worker_start_to_output_ms'] = 1000 * (completed - worker_start)
         if payload is False:
+            row['outcome'] = 'no_detections'
             raise ValueError('No 2D detections')
         row.update(validate_payload(payload))
         row['torch_peak_allocated_bytes'] = torch.cuda.max_memory_allocated()
@@ -417,11 +447,12 @@ def local_tests(args, out, chosen, config):
             stream.write(json.dumps(row, allow_nan=False) + '\n')
             stream.flush()
             print('local ' + sample['id'] + ': ' + row['status'], flush=True)
-            if warmup and row['status'] != 'ok':
+            if warmup and not accepted_outcome(row, args):
                 raise RuntimeError('Local warmup failed')
     save_json(out / 'summary.json', summarise(rows))
-    if any(r['status'] != 'ok' for r in rows):
+    if any(not accepted_outcome(r, args) for r in rows):
         raise RuntimeError('Local inference failures; see requests.jsonl')
+    return rows
 
 
 def cold_worker(args):
@@ -469,9 +500,10 @@ def cold_tests(args, out, chosen, config):
                 stream.write(json.dumps(row, allow_nan=False) + '\n')
                 stream.flush()
                 print('cold ' + sample['id'] + ': ' + row['status'], flush=True)
-                if row['status'] != 'ok':
+                if not accepted_outcome(row, args):
                     raise RuntimeError('Cold worker failed; resolve the failure before repeated initialisation')
     save_json(out / 'summary.json', summarise(rows))
+    return rows
 
 
 def interval_tests(args, chosen, url, out, record):
@@ -517,6 +549,8 @@ def main():
     p.add_argument('--limit', type=int, help='0 = all input folders; smoke default 5, others all')
     p.add_argument('--repeats', type=int, default=3)
     p.add_argument('--warmup', type=int, default=3)
+    p.add_argument('--allow-no-detections', action='store_true',
+                   help='Continue on the exact no-detection outcome; still count it separately from valid scenes')
     p.add_argument('--concurrency', type=int, nargs='+', default=[1, 2, 4, 8])
     p.add_argument('--intervals', type=float, nargs='+', default=[0.5, 1, 2, 3])
     p.add_argument('--timeout', type=float, default=120)
@@ -552,8 +586,11 @@ def main():
         if os.environ.get('CONDA_DEFAULT_ENV', '').split('/')[-1] != 'hsu':
             raise RuntimeError('Activate conda hsu before running inference')
         if args.suite in ('local', 'profile', 'cold'):
-            (cold_tests if args.suite == 'cold' else local_tests)(args, out, chosen, config)
-            save_json(out / 'run_status.json', {'completed': True, 'failures': 0})
+            rows = (cold_tests if args.suite == 'cold' else local_tests)(args, out, chosen, config)
+            save_json(out / 'run_status.json', {'completed': True,
+                       'failures': sum(r['status'] != 'ok' for r in rows if not r.get('warmup')),
+                       'no_detections': sum(r.get('outcome') == 'no_detections' for r in rows if not r.get('warmup')),
+                       'allow_no_detections': args.allow_no_detections})
             return
         records = []
         with managed_server(args, out, config) as url, (out / 'requests.jsonl').open('w') as stream:
@@ -571,7 +608,7 @@ def main():
             for i in range(warmup):
                 result = request_sample(url, chosen[i % len(chosen)], args.timeout)
                 record(result, 'warmup', i, 1)
-                if result[0]['status'] != 'ok':
+                if not accepted_outcome(result[0], args):
                     raise RuntimeError('Warmup failed; resolve smoke-test failure before benchmarking')
             repeats = 1 if args.suite == 'smoke' else args.repeats
             if args.suite == 'intervals':
@@ -599,9 +636,11 @@ def main():
                            for c in sorted(set(r['concurrency'] for r in records))}
             save_json(out / 'summary.json', summary)
         failures = sum(r['status'] != 'ok' for r in records)
-        save_json(out / 'run_status.json', {'completed': True, 'failures': failures})
+        save_json(out / 'run_status.json', {'completed': True, 'failures': failures,
+                  'no_detections': sum(r.get('outcome') == 'no_detections' for r in records),
+                  'allow_no_detections': args.allow_no_detections})
         print(json.dumps(summary, indent=2), flush=True)
-        if failures:
+        if any(not accepted_outcome(r, args) for r in records):
             raise RuntimeError(str(failures) + ' invalid/failed requests; inspect requests.jsonl')
     except Exception as exc:
         save_json(out / 'failure.json', {'error': type(exc).__name__ + ': ' + str(exc), 'traceback': traceback.format_exc()})

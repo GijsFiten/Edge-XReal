@@ -6,7 +6,7 @@ This code provides a minimal Flask server that exposes HSU pipelines (ThreeDScen
 
 ## RTX 4070 Laptop revision tests
 
-For a fresh WSL Ubuntu 24.04 installation with CUDA inside Conda, follow [SETUP_4070.md](SETUP_4070.md). This path includes asset verification, an inference-only LDIF build and the revision measurement runner. Laptop runtime validation is still pending.
+For WSL Ubuntu 24.04 with CUDA inside Conda, follow [SETUP_4070.md](SETUP_4070.md). This path includes asset verification, an inference-only LDIF build and the revision measurement runner. Core latency, loading, payload and the agreed serialized-concurrency trends are complete; see [REVISION_TESTS.md](REVISION_TESTS.md). The API uses one shared detector/HSU pair and serializes inference. No-detection responses remain explicit, and reconstruction accuracy has not been evaluated.
 
 ## Original reported environment
 

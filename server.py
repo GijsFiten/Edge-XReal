@@ -8,6 +8,7 @@ import json
 import gzip
 import sys
 import os
+import threading
 
 # Get repo root for later use
 _repo_root = os.path.dirname(os.path.abspath(__file__))
@@ -82,6 +83,11 @@ cfg.config['mode'] = 'demo'
 cfg.config['bb_model'] = _known_args.bb_model
 initiate(cfg)
 
+# One detector/HSU pair is initialized above and reused for every request.
+# Serialize the complete pipeline, including LDIF's shared temporary files.
+_inference_lock = threading.Lock()
+inference_policy = 'one_loaded_detector_and_hsu_pair; serialized_inference'
+
 preprocess = []
 calculations = []
 
@@ -118,7 +124,8 @@ def upload_photo():
     #print data to asses response time
     #print("preprocess = " + str(preprocess))
    
-    compressed_data = run(image,array)
+    with _inference_lock:
+        compressed_data = run(image,array)
     if(compressed_data == False):
         return jsonify({'error': 'No 2D detections'})
      
